@@ -1,0 +1,116 @@
+/* Light Theme (Default) */
+:root,
+[data-theme="light"] {
+  --color-bg-primary: #FFFFFF;
+  --color-bg-secondary: #F8FAFC;
+  --color-bg-surface: #FFFFFF;
+  --color-bg-elevated: #FFFFFF;
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #475569;
+  --color-text-muted: #64748B;
+  --color-text-inverse: #FFFFFF;
+  --color-border-default: #E2E8F0;
+  --color-border-subtle: #F1F5F9;
+  --color-border-strong: #94A3B8;
+  --color-accent-primary: #2563EB;
+  --color-accent-primary-hover: #1D4ED8;
+  --color-accent-secondary: #DBEAFE;
+  --color-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --color-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --color-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  --color-success: #15803D;
+  --color-warning: #A16207;
+  --color-error: #DC2626;
+  --color-info: #2563EB;
+  --toggle-container-bg: var(--color-bg-secondary);
+  --toggle-container-border: var(--color-border-default);
+  --toggle-segment-text: var(--color-text-secondary);
+  --toggle-segment-hover-bg: var(--color-bg-primary);
+  --toggle-segment-hover-text: var(--color-text-primary);
+  --toggle-selected-bg: var(--color-accent-primary);
+  --toggle-selected-text: var(--color-text-inverse);
+  --toggle-focus-ring: var(--color-accent-primary);
+}
+
+/* Dark Theme */
+[data-theme="dark"] {
+  --color-bg-primary: #0F172A;
+  --color-bg-secondary: #1E293B;
+  --color-bg-surface: #1E293B;
+  --color-bg-elevated: #334155;
+  --color-text-primary: #F8FAFC;
+  --color-text-secondary: #CBD5E1;
+  --color-text-muted: #94A3B8;
+  --color-text-inverse: #0F172A;
+  --color-border-default: #334155;
+  --color-border-subtle: #1E293B;
+  --color-border-strong: #64748B;
+  --color-accent-primary: #60A5FA;
+  --color-accent-primary-hover: #93C5FD;
+  --color-accent-secondary: #1E3A5F;
+  --color-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --color-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --color-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+  --color-success: #4ADE80;
+  --color-warning: #FBBF24;
+  --color-error: #F87171;
+  --color-info: #60A5FA;
+  --toggle-container-bg: var(--color-bg-elevated);
+  --toggle-container-border: var(--color-border-default);
+  --toggle-segment-text: var(--color-text-secondary);
+  --toggle-segment-hover-bg: var(--color-bg-secondary);
+  --toggle-segment-hover-text: var(--color-text-primary);
+  --toggle-selected-bg: var(--color-accent-primary);
+  --toggle-selected-text: var(--color-text-inverse);
+  --toggle-focus-ring: var(--color-accent-primary);
+}
+
+/* System Preference Detection */
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] {
+    --color-bg-primary: #0F172A;
+    --color-bg-secondary: #1E293B;
+    --color-bg-surface: #1E293B;
+    --color-bg-elevated: #334155;
+    --color-text-primary: #F8FAFC;
+    --color-text-secondary: #CBD5E1;
+    --color-text-muted: #94A3B8;
+    --color-text-inverse: #0F172A;
+    --color-border-default: #334155;
+    --color-border-subtle: #1E293B;
+    --color-border-strong: #64748B;
+    --color-accent-primary: #60A5FA;
+    --color-accent-primary-hover: #93C5FD;
+    --color-accent-secondary: #1E3A5F;
+    --color-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --color-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+    --color-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+    --color-success: #4ADE80;
+    --color-warning: #FBBF24;
+    --color-error: #F87171;
+    --color-info: #60A5FA;
+    --toggle-container-bg: var(--color-bg-elevated);
+    --toggle-container-border: var(--color-border-default);
+    --toggle-segment-text: var(--color-text-secondary);
+    --toggle-segment-hover-bg: var(--color-bg-secondary);
+    --toggle-segment-hover-text: var(--color-text-primary);
+    --toggle-selected-bg: var(--color-accent-primary);
+    --toggle-selected-text: var(--color-text-inverse);
+    --toggle-focus-ring: var(--color-accent-primary);
+  }
+}
+
+/* Theme Transition */
+[data-theme-transition] * {
+  transition: background-color 200ms ease,
+              color 200ms ease,
+              border-color 200ms ease,
+              box-shadow 200ms ease !important;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  [data-theme-transition] * {
+    transition: none !important;
+  }
+}
