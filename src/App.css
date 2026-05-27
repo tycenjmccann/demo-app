@@ -1,0 +1,40 @@
+.app {
+  min-height: 100vh;
+  background-color: #ffffff;
+  color: #0f172a;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+.settings {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+.settings__title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 2rem;
+}
+
+.settings__section {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.settings__section h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 0.5rem;
+}
+
+.settings__section p {
+  font-size: 0.875rem;
+  color: #475569;
+  margin: 0;
+}
