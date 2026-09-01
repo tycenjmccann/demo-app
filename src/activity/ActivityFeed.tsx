@@ -31,19 +31,26 @@ export function ActivityFeed() {
         <p className="activity-feed__empty">No recent activity yet.</p>
       ) : (
         <ul className="activity-feed">
-          {visible.map((activity) => (
-            <li key={activity.id} className="activity-feed__item">
-              <span className="activity-feed__type">{activity.type}</span>
-              <span className="activity-feed__desc">{activity.description}</span>
-              <time
-                className="activity-feed__time"
-                dateTime={new Date(activity.timestamp).toISOString()}
-                title={new Date(activity.timestamp).toString()}
-              >
-                {formatRelativeTime(activity.timestamp, now)}
-              </time>
-            </li>
-          ))}
+          {visible.map((activity) => {
+            // Defense in depth: even though the store rejects out-of-range
+            // timestamps, guard the Date conversion here so a bad value can
+            // never throw RangeError from toISOString()/toString() at render.
+            const date = new Date(activity.timestamp)
+            const isValidDate = !Number.isNaN(date.getTime())
+            return (
+              <li key={activity.id} className="activity-feed__item">
+                <span className="activity-feed__type">{activity.type}</span>
+                <span className="activity-feed__desc">{activity.description}</span>
+                <time
+                  className="activity-feed__time"
+                  dateTime={isValidDate ? date.toISOString() : undefined}
+                  title={isValidDate ? date.toString() : undefined}
+                >
+                  {formatRelativeTime(activity.timestamp, now)}
+                </time>
+              </li>
+            )
+          })}
         </ul>
       )}
     </section>

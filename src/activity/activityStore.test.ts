@@ -90,6 +90,28 @@ describe('activityStore', () => {
     expect(getActivities()).toEqual([])
   })
 
+  it('skips timestamps outside the valid Date range (TEAM-3658)', () => {
+    // Finite numbers beyond |8.64e15| pass Number.isFinite but are an Invalid
+    // Date; new Date(ts).toISOString() would throw RangeError at render time.
+    const bad = [
+      { id: 'a', type: 'ok', description: 'good', timestamp: 1000 },
+      { id: 'b', type: 'evil', description: 'huge ts', timestamp: 9e15 },
+      { id: 'c', type: 'evil', description: 'astronomical ts', timestamp: 1e300 },
+      { id: 'd', type: 'evil', description: 'huge negative ts', timestamp: -9e15 },
+      { id: 'e', type: 'ok', description: 'edge max', timestamp: 8.64e15 },
+    ]
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(bad))
+
+    const activities = getActivities()
+    // Only the in-range entries survive; newest-first ordering. The 8.64e15
+    // boundary is the max valid Date and must be kept.
+    expect(activities.map((a) => a.description)).toEqual(['edge max', 'good'])
+    // Every surviving timestamp must produce a valid Date.
+    for (const activity of activities) {
+      expect(Number.isNaN(new Date(activity.timestamp).getTime())).toBe(false)
+    }
+  })
+
   it('subscribe notifies on addActivity and unsubscribe is idempotent', () => {
     let count = 0
     const unsubscribe = subscribe(() => {
