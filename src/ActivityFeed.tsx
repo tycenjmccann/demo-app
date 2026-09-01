@@ -3,6 +3,16 @@ import { getActivities, subscribe, type Activity } from './activity'
 
 const MAX_VISIBLE_ACTIVITIES = 20
 
+function getActivityDateTime(timestamp: number) {
+  const date = new Date(timestamp)
+
+  if (Number.isNaN(date.getTime())) {
+    return undefined
+  }
+
+  return date.toISOString()
+}
+
 function getRelativeTime(timestamp: number) {
   const elapsedSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
 
@@ -36,7 +46,7 @@ function ActivityFeedItem({ activity }: { activity: Activity }) {
         <span className="activity-feed__type">{activity.type}</span>
         <p className="activity-feed__description">{activity.description}</p>
       </div>
-      <time className="activity-feed__time" dateTime={new Date(activity.timestamp).toISOString()}>
+      <time className="activity-feed__time" dateTime={getActivityDateTime(activity.timestamp)}>
         {getRelativeTime(activity.timestamp)}
       </time>
     </li>

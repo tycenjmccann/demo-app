@@ -9,8 +9,13 @@ type ActivityListener = () => void
 
 const STORAGE_KEY = 'demo.activity'
 const MAX_STORED_ACTIVITIES = 100
+const MAX_VALID_DATE_TIMESTAMP = 8.64e15
 const listeners = new Set<ActivityListener>()
 let fallbackIdCounter = 0
+
+function isValidDateTimestamp(timestamp: number) {
+  return Number.isFinite(timestamp) && Math.abs(timestamp) <= MAX_VALID_DATE_TIMESTAMP
+}
 
 function isActivity(value: unknown): value is Activity {
   if (!value || typeof value !== 'object') {
@@ -24,8 +29,25 @@ function isActivity(value: unknown): value is Activity {
     typeof activity.type === 'string' &&
     typeof activity.description === 'string' &&
     typeof activity.timestamp === 'number' &&
-    Number.isFinite(activity.timestamp)
+    isValidDateTimestamp(activity.timestamp)
   )
+}
+
+function sanitizeActivities(values: unknown[]) {
+  const seenIds = new Set<string>()
+
+  return values
+    .filter(isActivity)
+    .filter((activity) => {
+      if (seenIds.has(activity.id)) {
+        return false
+      }
+
+      seenIds.add(activity.id)
+      return true
+    })
+    .sort((leftActivity, rightActivity) => rightActivity.timestamp - leftActivity.timestamp)
+    .slice(0, MAX_STORED_ACTIVITIES)
 }
 
 function readStoredActivities(): Activity[] {
@@ -42,7 +64,7 @@ function readStoredActivities(): Activity[] {
       return []
     }
 
-    return parsedValue.filter(isActivity).slice(0, MAX_STORED_ACTIVITIES)
+    return sanitizeActivities(parsedValue)
   } catch {
     return []
   }
@@ -61,7 +83,7 @@ function createActivityId() {
     return crypto.randomUUID()
   } catch {
     fallbackIdCounter += 1
-    return `${Date.now()}-${fallbackIdCounter}`
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}-${fallbackIdCounter}`
   }
 }
 
