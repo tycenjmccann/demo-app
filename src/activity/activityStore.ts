@@ -1,114 +1,141 @@
-// Persistence + pub/sub store for the Recent Activity feed.
+// Unified persistence + pub/sub store for the Recent Activity feed.
+//
+// This file reconciles two independent implementations that both landed at
+// src/activity* against the same localStorage key "demo.activity":
+//   - TEAM-3628 (main): sort-based newest-first ordering, id de-duplication,
+//     crypto.randomUUID ids, addActivity returns the created entry.
+//   - TEAM-3630 (branch): TEAM-3658 hardening that rejects timestamps outside
+//     the valid ECMAScript Date range, corrupt-storage resilience, and
+//     StrictMode-safe idempotent subscribe/unsubscribe.
 //
 // STORAGE FORMAT: localStorage key "demo.activity" holds a JSON array of
-// ActivityEntry objects. STORED ORDER IS OLDEST-FIRST: new entries are
-// appended at the END of the array. Display order (newest-first) is derived
-// by reversing at read time in getActivities().
+// activity objects. getActivities() always returns entries NEWEST-FIRST,
+// derived via a stable sort by timestamp descending. Equal timestamps keep
+// their stored order.
 
-export interface ActivityEntry {
+export type Activity = {
   id: string
   type: string
   description: string
   timestamp: number // epoch milliseconds
 }
 
+// Backwards-compatible alias for the TEAM-3630 lineage, which referred to the
+// same shape as `ActivityEntry`.
+export type ActivityEntry = Activity
+
+type ActivityListener = () => void
+
 const STORAGE_KEY = 'demo.activity'
-const MAX_ENTRIES = 100
+const MAX_STORED_ACTIVITIES = 100
 
 // Maximum absolute epoch-ms value representable as a valid ECMAScript Date.
-// Timestamps beyond this are "Invalid Date" and would throw from
-// Date.prototype.toISOString() during render.
-const MAX_TIMESTAMP = 8.64e15
+// Finite numbers beyond this pass Number.isFinite but are an "Invalid Date";
+// new Date(ts).toISOString() would throw a RangeError at render time. Bounding
+// here keeps the store's contract consistent with what the render layer
+// assumes (TEAM-3658 hardening).
+const MAX_VALID_DATE_TIMESTAMP = 8.64e15
 
 // Module-level subscriber registry. Using a Set guarantees each listener is
 // registered at most once, which keeps subscribe/unsubscribe idempotent and
 // safe under React StrictMode's double-invoked effects in development.
-const listeners = new Set<() => void>()
+const listeners = new Set<ActivityListener>()
 
-/**
- * Read + validate the persisted array. Fails soft to [] on any problem:
- * - missing key
- * - malformed JSON
- * - valid JSON but not an array
- * - localStorage throwing (unavailable / access denied)
- * Individual malformed entries are skipped defensively.
- * Returned array is in STORED ORDER (oldest-first).
- */
-function readRaw(): ActivityEntry[] {
-  let rawText: string | null
-  try {
-    rawText = localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return []
-  }
+let fallbackIdCounter = 0
 
-  if (rawText == null) {
-    return []
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(rawText)
-  } catch {
-    return []
-  }
-
-  if (!Array.isArray(parsed)) {
-    return []
-  }
-
-  const result: ActivityEntry[] = []
-  for (const item of parsed) {
-    if (isValidEntry(item)) {
-      result.push(item)
-    }
-  }
-  return result
+function isValidDateTimestamp(timestamp: number): boolean {
+  return Number.isFinite(timestamp) && Math.abs(timestamp) <= MAX_VALID_DATE_TIMESTAMP
 }
 
-function isValidEntry(value: unknown): value is ActivityEntry {
-  if (typeof value !== 'object' || value === null) {
+function isActivity(value: unknown): value is Activity {
+  if (!value || typeof value !== 'object') {
     return false
   }
-  const entry = value as Record<string, unknown>
+
+  const activity = value as Partial<Activity>
+
   return (
-    typeof entry.id === 'string' &&
-    typeof entry.type === 'string' &&
-    typeof entry.description === 'string' &&
-    typeof entry.timestamp === 'number' &&
-    Number.isFinite(entry.timestamp) &&
-    // Reject finite numbers outside the ECMAScript Date range (|ms| > 8.64e15).
-    // Such values are "Invalid Date", and new Date(ts).toISOString() throws a
-    // RangeError at render time. Bounding here keeps the validation contract
-    // consistent with what the ActivityFeed render assumes.
-    Math.abs(entry.timestamp) <= MAX_TIMESTAMP
+    typeof activity.id === 'string' &&
+    typeof activity.type === 'string' &&
+    typeof activity.description === 'string' &&
+    typeof activity.timestamp === 'number' &&
+    isValidDateTimestamp(activity.timestamp)
   )
 }
 
 /**
- * Persist the array (stored order, oldest-first). Fails soft: any error
- * (e.g. quota exceeded, storage unavailable) is swallowed so an exception
- * never reaches React render.
+ * Validate, de-duplicate (by id, keeping first occurrence), sort newest-first
+ * (stable, so equal timestamps keep stored order), and cap to MAX_STORED_ACTIVITIES.
+ * Individual malformed entries are skipped defensively.
  */
-function writeRaw(entries: ActivityEntry[]): void {
+function sanitizeActivities(values: unknown[]): Activity[] {
+  const seenIds = new Set<string>()
+
+  return values
+    .filter(isActivity)
+    .filter((activity) => {
+      if (seenIds.has(activity.id)) {
+        return false
+      }
+
+      seenIds.add(activity.id)
+      return true
+    })
+    .sort((leftActivity, rightActivity) => rightActivity.timestamp - leftActivity.timestamp)
+    .slice(0, MAX_STORED_ACTIVITIES)
+}
+
+/**
+ * Read + validate the persisted array. Fails soft to [] on any problem:
+ * missing key, malformed JSON, valid JSON that is not an array, or
+ * localStorage throwing (unavailable / access denied).
+ */
+function readStoredActivities(): Activity[] {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
+    const storedValue = localStorage.getItem(STORAGE_KEY)
+
+    if (!storedValue) {
+      return []
+    }
+
+    const parsedValue: unknown = JSON.parse(storedValue)
+
+    if (!Array.isArray(parsedValue)) {
+      return []
+    }
+
+    return sanitizeActivities(parsedValue)
   } catch {
-    // Fail soft: ignore persistence errors.
+    return []
   }
 }
 
-// Counter to help build stable unique ids for React keys.
-let idCounter = 0
-
-function makeId(timestamp: number): string {
-  idCounter += 1
-  return `${timestamp}-${idCounter}-${Math.random().toString(36).slice(2, 10)}`
+/**
+ * Persist the array (already newest-first). Fails soft: any error
+ * (e.g. quota exceeded, storage unavailable) is swallowed so an exception
+ * never reaches React render.
+ */
+function writeStoredActivities(activities: Activity[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(activities))
+  } catch {
+    return
+  }
 }
 
-function notify(): void {
+function createActivityId(): string {
+  try {
+    return crypto.randomUUID()
+  } catch {
+    fallbackIdCounter += 1
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}-${fallbackIdCounter}`
+  }
+}
+
+function notifySubscribers(): void {
   // Snapshot to avoid mutation-during-iteration issues if a listener
-  // unsubscribes itself synchronously.
+  // unsubscribes itself synchronously; also isolate a misbehaving listener so
+  // it cannot break the notification loop.
   for (const listener of Array.from(listeners)) {
     try {
       listener()
@@ -119,40 +146,30 @@ function notify(): void {
 }
 
 /**
- * Append a new activity entry (stored oldest-first), enforce the 100-entry
- * cap by dropping the oldest, persist, then notify subscribers.
- * Fails soft on any error.
+ * Prepend a new activity entry (newest-first), enforce the 100-entry cap by
+ * dropping the oldest, persist, then notify subscribers. Returns the created
+ * entry. Fails soft on persistence errors.
  */
-export function addActivity(type: string, description: string): void {
-  try {
-    const entries = readRaw()
-    const entry: ActivityEntry = {
-      id: makeId(Date.now()),
-      type,
-      description,
-      timestamp: Date.now(),
-    }
-    entries.push(entry) // append at end => stored oldest-first
-    // Cap at MAX_ENTRIES: drop oldest (front) so length never exceeds cap.
-    while (entries.length > MAX_ENTRIES) {
-      entries.shift()
-    }
-    writeRaw(entries)
-  } catch {
-    // Fail soft: never let addActivity throw into a caller / render path.
-    return
+export function addActivity(type: string, description: string): Activity {
+  const activity: Activity = {
+    id: createActivityId(),
+    type,
+    description,
+    timestamp: Date.now(),
   }
-  // Notify after persisting so subscribers read fresh data.
-  notify()
+  const activities = [activity, ...readStoredActivities()].slice(0, MAX_STORED_ACTIVITIES)
+
+  writeStoredActivities(activities)
+  notifySubscribers()
+
+  return activity
 }
 
 /**
- * Single read source for the component. Returns entries NEWEST-FIRST
- * for display (stored order is oldest-first, so we reverse a copy).
+ * Single read source for the component. Returns entries NEWEST-FIRST.
  */
-export function getActivities(): ActivityEntry[] {
-  const entries = readRaw()
-  return entries.reverse()
+export function getActivities(): Activity[] {
+  return readStoredActivities()
 }
 
 /**
@@ -163,9 +180,10 @@ export function getActivities(): ActivityEntry[] {
  * A native `storage` event does NOT fire in the tab that performed the write,
  * so this pub/sub is required for same-tab live updates.
  */
-export function subscribe(listener: () => void): () => void {
+export function subscribe(listener: ActivityListener): () => void {
   listeners.add(listener)
   let subscribed = true
+
   return () => {
     if (!subscribed) {
       return
