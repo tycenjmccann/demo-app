@@ -161,6 +161,23 @@ describe('ActivityFeed', () => {
     expect(screen.getByText('Shipped v1.2.3')).toBeDefined()
   })
 
+  it('renders without throwing when a stored entry has an out-of-range timestamp', () => {
+    // A finite but out-of-range timestamp would make new Date(...).toISOString()
+    // throw during render and crash the page. It must be filtered before render,
+    // while a valid sibling entry still shows.
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: 'huge', type: 'deploy', description: 'out of range', timestamp: 1e20 },
+        { id: 'ok', type: 'deploy', description: 'Shipped v1.2.3', timestamp: 1_700_000_000_000 },
+      ]),
+    )
+
+    expect(() => render(<ActivityFeed />)).not.toThrow()
+    expect(renderedDescriptions()).toEqual(['Shipped v1.2.3'])
+    expect(screen.queryByText('out of range')).toBeNull()
+  })
+
   it('exposes a machine-readable timestamp on each entry', () => {
     const [entry] = seed(1)
     render(<ActivityFeed />)
