@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Deploy-run artifact (see DEPLOY.md)
+.last-deployed-sha
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
