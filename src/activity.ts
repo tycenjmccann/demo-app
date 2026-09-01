@@ -16,15 +16,41 @@ const MINUTE = 60_000
 const HOUR = 3_600_000
 const DAY = 86_400_000
 
+/** Largest absolute epoch-ms value a `Date` can represent (ECMAScript max time value). */
+const MAX_TIME_VALUE = 8.64e15
+
 /**
- * Monotonic suffix so two entries created within the same millisecond still get
- * distinct ids. Zero padded so plain string comparison matches numeric order.
+ * Per-context random token, computed once at module load. Different browsing
+ * contexts (tabs, reloads) that share this origin's localStorage get different
+ * tokens, so same-millisecond ids minted in separate contexts never collide.
+ */
+const contextToken = (() => {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID().slice(0, 8)
+    }
+  } catch {
+    // Fall through to the Math.random fallback below.
+  }
+  return Math.random().toString(36).slice(2, 10)
+})()
+
+/**
+ * Monotonic counter so two entries created within the same millisecond in this
+ * context still get distinct ids. Zero padded so, within a single context,
+ * plain string comparison of ids matches creation order.
  */
 let sequence = 0
 
+/**
+ * Builds an id as `${timestamp}-${contextToken}-${counter}`: the timestamp
+ * orders across time, the per-context token keeps ids unique across tabs and
+ * reloads sharing the same store, and the zero-padded counter keeps same-context,
+ * same-millisecond ids sortable in creation order under string comparison.
+ */
 function nextId(timestamp: number): string {
   const suffix = String(sequence++).padStart(6, '0')
-  return `${timestamp}-${suffix}`
+  return `${timestamp}-${contextToken}-${suffix}`
 }
 
 function isActivityItem(value: unknown): value is ActivityItem {
@@ -35,7 +61,10 @@ function isActivityItem(value: unknown): value is ActivityItem {
     typeof item.type === 'string' &&
     typeof item.description === 'string' &&
     typeof item.timestamp === 'number' &&
-    Number.isFinite(item.timestamp)
+    Number.isFinite(item.timestamp) &&
+    // Reject values outside the representable Date range so downstream
+    // `new Date(timestamp).toISOString()` never throws (FR-8).
+    Math.abs(item.timestamp) <= MAX_TIME_VALUE
   )
 }
 

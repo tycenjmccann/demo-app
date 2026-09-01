@@ -47,6 +47,26 @@ describe('addActivity', () => {
     expect(new Set(ids).size).toBe(2)
   })
 
+  it('mints unique ids across independent module contexts sharing one store', async () => {
+    // Two same-origin contexts (e.g. two tabs or a reload) each load a fresh
+    // module with its own sequence counter but share this origin's localStorage.
+    // Freeze the clock so both adds land in the same epoch-millisecond.
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+
+    vi.resetModules()
+    const contextA = await import('./activity')
+    vi.resetModules()
+    const contextB = await import('./activity')
+
+    const a = contextA.addActivity('a', 'from context A')
+    const b = contextB.addActivity('a', 'from context B')
+
+    expect(a.id).not.toBe(b.id)
+    // Both entries reached the single shared store with distinct ids.
+    const ids = readRaw().map(entry => entry.id)
+    expect(new Set(ids).size).toBe(2)
+  })
+
   it('caps storage at 100 entries, dropping the oldest', () => {
     let clock = 1_700_000_000_000
     vi.spyOn(Date, 'now').mockImplementation(() => clock++)
@@ -203,6 +223,36 @@ describe('getActivities', () => {
     expect(() => getActivities()).not.toThrow()
     expect(getActivities()).toEqual([
       { id: 'ok', type: 'a', description: 'valid', timestamp: 5000 },
+    ])
+  })
+
+  it('filters out finite timestamps outside the representable Date range', () => {
+    // 1e20 is finite but too large for Date; new Date(1e20).toISOString() throws.
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: 'huge', type: 'a', description: 'out of range', timestamp: 1e20 },
+        { id: 'ok', type: 'a', description: 'valid', timestamp: 5000 },
+      ]),
+    )
+
+    expect(() => getActivities()).not.toThrow()
+    expect(getActivities()).toEqual([
+      { id: 'ok', type: 'a', description: 'valid', timestamp: 5000 },
+    ])
+  })
+
+  it('keeps timestamps exactly at the max representable Date value', () => {
+    // 8.64e15 is the ECMAScript max time value and is still a valid Date.
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: 'edge', type: 'a', description: 'at boundary', timestamp: 8.64e15 },
+      ]),
+    )
+
+    expect(getActivities()).toEqual([
+      { id: 'edge', type: 'a', description: 'at boundary', timestamp: 8.64e15 },
     ])
   })
 })
