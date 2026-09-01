@@ -1,4 +1,5 @@
 import './App.css'
+import ActivityFeed from './activity/ActivityFeed'
 
 function App() {
   return (
@@ -9,6 +10,7 @@ function App() {
           <h2>General</h2>
           <p>Application settings will appear here.</p>
         </section>
+        <ActivityFeed />
       </div>
     </div>
   )
