@@ -15,6 +15,11 @@ export interface ActivityEntry {
 const STORAGE_KEY = 'demo.activity'
 const MAX_ENTRIES = 100
 
+// Maximum absolute epoch-ms value representable as a valid ECMAScript Date.
+// Timestamps beyond this are "Invalid Date" and would throw from
+// Date.prototype.toISOString() during render.
+const MAX_TIMESTAMP = 8.64e15
+
 // Module-level subscriber registry. Using a Set guarantees each listener is
 // registered at most once, which keeps subscribe/unsubscribe idempotent and
 // safe under React StrictMode's double-invoked effects in development.
@@ -71,7 +76,12 @@ function isValidEntry(value: unknown): value is ActivityEntry {
     typeof entry.type === 'string' &&
     typeof entry.description === 'string' &&
     typeof entry.timestamp === 'number' &&
-    Number.isFinite(entry.timestamp)
+    Number.isFinite(entry.timestamp) &&
+    // Reject finite numbers outside the ECMAScript Date range (|ms| > 8.64e15).
+    // Such values are "Invalid Date", and new Date(ts).toISOString() throws a
+    // RangeError at render time. Bounding here keeps the validation contract
+    // consistent with what the ActivityFeed render assumes.
+    Math.abs(entry.timestamp) <= MAX_TIMESTAMP
   )
 }
 
