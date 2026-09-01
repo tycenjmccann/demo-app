@@ -1,7 +1,7 @@
-import './App.css'
 import { useState } from 'react'
-import { ActivityFeed } from './ActivityFeed'
+import ActivityFeed from './ActivityFeed'
 import { addActivity } from './activity'
+import './App.css'
 
 function App() {
   const [emailNotificationsEnabled, setEmailNotificationsEnabled] = useState(false)

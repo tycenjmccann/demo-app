@@ -83,12 +83,12 @@
   color: #ffffff;
 }
 
-.activity-feed__list { list-style: none; margin: 1rem 0 0; padding: 0; }
-.activity-feed__item { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 0.875rem 0; }
+/* ── Recent Activity feed ── card chrome inherited from .settings__section */
+.activity-feed__list { list-style: none; margin: 0; padding: 0; }
+.activity-feed__item { display: flex; align-items: baseline; gap: 0.75rem; padding: 0.75rem 0; border-bottom: 1px solid #e2e8f0; }
 .activity-feed__item:first-child { padding-top: 0; }
-.activity-feed__item + .activity-feed__item { border-top: 1px solid #e2e8f0; }
-.activity-feed__content { min-width: 0; }
-.activity-feed__type { display: block; margin-bottom: 0.25rem; color: #0f172a; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; line-height: 1.4; text-transform: uppercase; }
-.activity-feed__description { color: #475569; font-size: 0.875rem; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
-.activity-feed__time { flex: 0 0 auto; color: #475569; font-size: 0.75rem; line-height: 1.5; text-align: right; white-space: nowrap; }
-.activity-feed__empty { color: #475569; font-size: 0.875rem; line-height: 1.5; margin: 1rem 0 0; }
+.activity-feed__item:last-child { border-bottom: none; padding-bottom: 0; }
+.activity-feed__type { flex: 0 0 auto; align-self: flex-start; padding: 0.125rem 0.5rem; border-radius: 9999px; background: #f1f5f9; color: #334155; font-size: 0.6875rem; font-weight: 600; line-height: 1.4; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
+.activity-feed__description { flex: 1 1 auto; min-width: 0; font-size: 0.875rem; color: #0f172a; line-height: 1.45; overflow-wrap: break-word; }
+.activity-feed__time { flex: 0 0 auto; font-size: 0.75rem; color: #475569; white-space: nowrap; }
+.activity-feed__empty { font-size: 0.875rem; color: #475569; text-align: center; margin: 0; padding: 1.5rem 0; }

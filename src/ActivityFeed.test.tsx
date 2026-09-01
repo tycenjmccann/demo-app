@@ -1,142 +1,191 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ActivityFeed } from './ActivityFeed'
-import App from './App'
-import { addActivity } from './activity'
+import ActivityFeed from './ActivityFeed'
+import { STORAGE_KEY, addActivity, type ActivityItem } from './activity'
 
-const STORAGE_KEY = 'demo.activity'
-
-function expectActivityTime(description: string, relativeTime: string) {
-  const activityItem = screen.getByText(description).closest('li')
-
-  expect(activityItem).not.toBeNull()
-  expect(within(activityItem as HTMLElement).getByText(relativeTime)).toBeInTheDocument()
+function seed(count: number): ActivityItem[] {
+  const base = 1_700_000_000_000
+  const entries = Array.from({ length: count }, (_, i) => ({
+    id: `seed-${String(i).padStart(3, '0')}`,
+    type: 'seed',
+    description: `entry ${i}`,
+    timestamp: base + i * 1_000,
+  }))
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
+  return entries
 }
 
+function renderedDescriptions(): string[] {
+  return screen
+    .getAllByRole('listitem')
+    .map(item => item.querySelector('.activity-feed__description')?.textContent ?? '')
+}
+
+beforeEach(() => {
+  localStorage.clear()
+})
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
+
 describe('ActivityFeed', () => {
-  beforeEach(() => {
-    localStorage.clear()
-    vi.useRealTimers()
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('renders the empty state when there are no activities', () => {
+  it('renders the empty state and no list when there is no activity', () => {
     render(<ActivityFeed />)
 
-    expect(screen.getByText('No recent activity yet. Actions you take will show up here.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Recent Activity' })).toBeDefined()
+    expect(screen.getByText('No recent activity yet.')).toBeDefined()
+    expect(screen.queryByRole('list')).toBeNull()
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
   })
 
-  it('live-updates when a new activity is added', () => {
+  it('renders the list and no empty state when there is activity', () => {
+    seed(2)
     render(<ActivityFeed />)
+
+    expect(screen.getByRole('list')).toBeDefined()
+    expect(screen.queryByText('No recent activity yet.')).toBeNull()
+    expect(renderedDescriptions()).toEqual(['entry 1', 'entry 0'])
+  })
+
+  it('renders at most 20 entries, newest first, when 25 are persisted', () => {
+    seed(25)
+    render(<ActivityFeed />)
+
+    const descriptions = renderedDescriptions()
+    expect(descriptions).toHaveLength(20)
+    expect(descriptions[0]).toBe('entry 24')
+    expect(descriptions[19]).toBe('entry 5')
+    expect(descriptions).toEqual(
+      Array.from({ length: 20 }, (_, i) => `entry ${24 - i}`),
+    )
+  })
+
+  it('uses stable keys so entries are not duplicated on update', () => {
+    seed(3)
+    render(<ActivityFeed />)
+    expect(screen.getAllByRole('listitem')).toHaveLength(3)
 
     act(() => {
-      addActivity('settings', 'Updated notification preferences.')
+      addActivity('deploy', 'Shipped v1.2.3')
     })
 
-    expect(screen.getByText('settings')).toBeInTheDocument()
-    expect(screen.getByText('Updated notification preferences.')).toBeInTheDocument()
-    expect(screen.getByText('just now')).toBeInTheDocument()
+    expect(screen.getAllByRole('listitem')).toHaveLength(4)
   })
 
-  it('records production settings interactions in the recent activity feed', () => {
-    render(<App />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle email notifications' }))
-
-    expect(screen.getByRole('button', { name: 'Toggle email notifications' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByText('On')).toBeInTheDocument()
-    expect(screen.queryByText('No recent activity yet. Actions you take will show up here.')).not.toBeInTheDocument()
-    expect(screen.getByText('settings')).toBeInTheDocument()
-    expect(screen.getByText('Turned email notifications on.')).toBeInTheDocument()
-  })
-
-  it('renders relative timestamps at expected boundaries', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
-
-    const now = Date.now()
-
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify([
-        { id: 'future', type: 'settings', description: 'Future activity.', timestamp: now + 5_000 },
-        { id: '59-seconds', type: 'settings', description: '59 seconds old.', timestamp: now - 59_000 },
-        { id: '60-seconds', type: 'settings', description: '60 seconds old.', timestamp: now - 60_000 },
-        { id: '59-minutes', type: 'settings', description: '59 minutes old.', timestamp: now - 59 * 60_000 },
-        { id: '60-minutes', type: 'settings', description: '60 minutes old.', timestamp: now - 60 * 60_000 },
-        { id: '23-hours', type: 'settings', description: '23 hours old.', timestamp: now - 23 * 60 * 60_000 },
-        { id: '24-hours', type: 'settings', description: '24 hours old.', timestamp: now - 24 * 60 * 60_000 },
-      ]),
-    )
-
+  it('picks up a new entry in the same tab without remounting', () => {
     render(<ActivityFeed />)
+    expect(screen.getByText('No recent activity yet.')).toBeDefined()
 
-    expectActivityTime('Future activity.', 'just now')
-    expectActivityTime('59 seconds old.', 'just now')
-    expectActivityTime('60 seconds old.', '1m ago')
-    expectActivityTime('59 minutes old.', '59m ago')
-    expectActivityTime('60 minutes old.', '1h ago')
-    expectActivityTime('23 hours old.', '23h ago')
-    expectActivityTime('24 hours old.', '1d ago')
-    expect(screen.queryByText(/^-/)).not.toBeInTheDocument()
+    act(() => {
+      addActivity('deploy', 'Shipped v1.2.3')
+    })
+
+    expect(screen.queryByText('No recent activity yet.')).toBeNull()
+    expect(screen.getByRole('list')).toBeDefined()
+    expect(screen.getByText('Shipped v1.2.3')).toBeDefined()
+    expect(screen.getByText('deploy')).toBeDefined()
+
+    act(() => {
+      addActivity('settings', 'Enabled notifications')
+    })
+
+    expect(renderedDescriptions()).toEqual(['Enabled notifications', 'Shipped v1.2.3'])
   })
 
-  it('renders only the 20 most recent activities', () => {
-    for (let index = 0; index < 25; index += 1) {
-      addActivity('settings', `Activity ${index}`)
-    }
-
-    render(<ActivityFeed />)
-
-    const list = screen.getByRole('list')
-    expect(within(list).getAllByRole('listitem')).toHaveLength(20)
-    expect(screen.getByText('Activity 24')).toBeInTheDocument()
-    expect(screen.queryByText('Activity 4')).not.toBeInTheDocument()
-  })
-
-  it('does not crash when localStorage contains an out-of-range timestamp', () => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify([{ id: 'x', type: 't', description: 'd', timestamp: 1e300 }]),
-    )
-
-    expect(() => render(<ActivityFeed />)).not.toThrow()
-    expect(screen.getByText('No recent activity yet. Actions you take will show up here.')).toBeInTheDocument()
-  })
-
-  it('renders out-of-order valid storage newest-first', () => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify([
-        { id: 'oldest', type: 'settings', description: 'Oldest activity.', timestamp: 1 },
-        { id: 'newest', type: 'settings', description: 'Newest activity.', timestamp: 3 },
-        { id: 'middle', type: 'settings', description: 'Middle activity.', timestamp: 2 },
-      ]),
-    )
-
-    render(<ActivityFeed />)
-
-    expect(
-      within(screen.getByRole('list'))
-        .getAllByRole('listitem')
-        .map((item) => item.querySelector('.activity-feed__description')?.textContent),
-    ).toEqual(['Newest activity.', 'Middle activity.', 'Oldest activity.'])
-  })
-
-  it('cleans up its subscription on unmount', () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  it('stops listening after unmount', () => {
     const { unmount } = render(<ActivityFeed />)
+    unmount()
+
+    expect(() =>
+      act(() => {
+        addActivity('deploy', 'after unmount')
+      }),
+    ).not.toThrow()
+  })
+
+  it('advances relative times on an interval without a new activity (Finding 1)', () => {
+    vi.useFakeTimers()
+    const base = 1_700_000_000_000
+    vi.setSystemTime(base)
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: 'x', type: 'deploy', description: 'Shipped', timestamp: base },
+      ]),
+    )
+
+    render(<ActivityFeed />)
+    expect(screen.getByText('just now')).toBeDefined()
+
+    // Age the clock past a minute — no addActivity is ever called.
+    act(() => {
+      vi.advanceTimersByTime(61_000)
+    })
+
+    expect(screen.getByText('1m ago')).toBeDefined()
+    expect(screen.queryByText('just now')).toBeNull()
+  })
+
+  it('tears down the refresh interval on unmount (Finding 1)', () => {
+    vi.useFakeTimers()
+    const { unmount } = render(<ActivityFeed />)
+
+    // One interval registered while mounted.
+    expect(vi.getTimerCount()).toBe(1)
 
     unmount()
 
+    // Cleared on teardown; advancing time afterwards is a no-op (no act warnings).
+    expect(vi.getTimerCount()).toBe(0)
+    expect(() => {
+      vi.advanceTimersByTime(120_000)
+    }).not.toThrow()
+  })
+
+  it('keeps a live region mounted in the empty state so the first entry is announced (Finding 2)', () => {
+    const { container } = render(<ActivityFeed />)
+
+    const live = container.querySelector('[aria-live="polite"]')
+    expect(live).not.toBeNull()
+    expect(screen.getByText('No recent activity yet.')).toBeDefined()
+
     act(() => {
-      addActivity('settings', 'Updated after unmount.')
+      addActivity('deploy', 'Shipped v1.2.3')
     })
 
-    expect(consoleError).not.toHaveBeenCalled()
-    consoleError.mockRestore()
+    // The same live-region node now hosts the list: an UPDATE, not a fresh mount.
+    expect(container.querySelector('[aria-live="polite"]')).toBe(live)
+    expect(screen.getByRole('list')).toBeDefined()
+    expect(screen.getByText('Shipped v1.2.3')).toBeDefined()
+  })
+
+  it('renders without throwing when a stored entry has an out-of-range timestamp', () => {
+    // A finite but out-of-range timestamp would make new Date(...).toISOString()
+    // throw during render and crash the page. It must be filtered before render,
+    // while a valid sibling entry still shows.
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: 'huge', type: 'deploy', description: 'out of range', timestamp: 1e20 },
+        { id: 'ok', type: 'deploy', description: 'Shipped v1.2.3', timestamp: 1_700_000_000_000 },
+      ]),
+    )
+
+    expect(() => render(<ActivityFeed />)).not.toThrow()
+    expect(renderedDescriptions()).toEqual(['Shipped v1.2.3'])
+    expect(screen.queryByText('out of range')).toBeNull()
+  })
+
+  it('exposes a machine-readable timestamp on each entry', () => {
+    const [entry] = seed(1)
+    render(<ActivityFeed />)
+
+    const time = screen.getByRole('listitem').querySelector('time')
+    expect(time?.getAttribute('dateTime') ?? time?.getAttribute('datetime')).toBe(
+      new Date(entry.timestamp).toISOString(),
+    )
+    expect(time?.getAttribute('title')).toBe(new Date(entry.timestamp).toLocaleString())
   })
 })

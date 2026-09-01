@@ -1,158 +1,304 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { addActivity, getActivities, subscribe } from './activity'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  MAX_ENTRIES,
+  STORAGE_KEY,
+  addActivity,
+  getActivities,
+  relativeTime,
+  subscribe,
+  type ActivityItem,
+} from './activity'
 
-const STORAGE_KEY = 'demo.activity'
+function readRaw(): ActivityItem[] {
+  return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as ActivityItem[]
+}
 
-describe('activity store', () => {
-  beforeEach(() => {
-    localStorage.clear()
-    vi.useRealTimers()
+beforeEach(() => {
+  localStorage.clear()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe('addActivity', () => {
+  it('writes a well-formed entry to localStorage', () => {
+    const before = Date.now()
+    addActivity('settings', 'Changed the theme to dark')
+    const stored = readRaw()
+
+    expect(stored).toHaveLength(1)
+    const [entry] = stored
+    expect(typeof entry.id).toBe('string')
+    expect(entry.id.length).toBeGreaterThan(0)
+    expect(entry.type).toBe('settings')
+    expect(entry.description).toBe('Changed the theme to dark')
+    expect(typeof entry.timestamp).toBe('number')
+    expect(entry.timestamp).toBeGreaterThanOrEqual(before)
+    expect(Object.keys(entry).sort()).toEqual(['description', 'id', 'timestamp', 'type'])
   })
 
-  it('adds entries with required fields and persists under demo.activity', () => {
-    const activity = addActivity('settings', 'Updated notification preferences.')
-    const storedActivities = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+  it('mints unique ids for two adds within the same millisecond', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+    addActivity('a', 'first')
+    addActivity('a', 'second')
 
-    expect(activity.id).toEqual(expect.any(String))
-    expect(activity.type).toBe('settings')
-    expect(activity.description).toBe('Updated notification preferences.')
-    expect(activity.timestamp).toEqual(expect.any(Number))
-    expect(storedActivities).toEqual([activity])
-    expect(getActivities()).toEqual([activity])
+    const ids = readRaw().map(entry => entry.id)
+    expect(new Set(ids).size).toBe(2)
   })
 
-  it('returns newest activities first while preserving prepend order for equal timestamps', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+  it('mints unique ids across independent module contexts sharing one store', async () => {
+    // Two same-origin contexts (e.g. two tabs or a reload) each load a fresh
+    // module with its own sequence counter but share this origin's localStorage.
+    // Freeze the clock so both adds land in the same epoch-millisecond.
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
 
-    const firstActivity = addActivity('settings', 'First update.')
-    const secondActivity = addActivity('settings', 'Second update.')
-    const thirdActivity = addActivity('settings', 'Third update.')
+    vi.resetModules()
+    const contextA = await import('./activity')
+    vi.resetModules()
+    const contextB = await import('./activity')
 
-    expect(getActivities().map((activity) => activity.id)).toEqual([
-      thirdActivity.id,
-      secondActivity.id,
-      firstActivity.id,
+    const a = contextA.addActivity('a', 'from context A')
+    const b = contextB.addActivity('a', 'from context B')
+
+    expect(a.id).not.toBe(b.id)
+    // Both entries reached the single shared store with distinct ids.
+    const ids = readRaw().map(entry => entry.id)
+    expect(new Set(ids).size).toBe(2)
+  })
+
+  it('caps storage at 100 entries, dropping the oldest', () => {
+    let clock = 1_700_000_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => clock++)
+
+    const added: ActivityItem[] = []
+    for (let i = 0; i < MAX_ENTRIES + 1; i++) {
+      added.push(addActivity('bulk', `entry ${i}`))
+    }
+
+    // The 100th add must still leave exactly 100 entries (no premature trim).
+    const stored = readRaw()
+    expect(stored).toHaveLength(MAX_ENTRIES)
+
+    const storedIds = new Set(stored.map(entry => entry.id))
+    expect(storedIds.has(added[0].id)).toBe(false)
+    for (const entry of added.slice(1)) {
+      expect(storedIds.has(entry.id)).toBe(true)
+    }
+    expect(stored.some(entry => entry.description === 'entry 0')).toBe(false)
+    expect(stored.some(entry => entry.description === 'entry 1')).toBe(true)
+    expect(stored.some(entry => entry.description === `entry ${MAX_ENTRIES}`)).toBe(true)
+  })
+
+  it('holds exactly 100 entries after the 100th add and after the 101st', () => {
+    let clock = 1_700_000_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => clock++)
+
+    for (let i = 0; i < MAX_ENTRIES; i++) addActivity('bulk', `entry ${i}`)
+    expect(readRaw()).toHaveLength(MAX_ENTRIES)
+
+    addActivity('bulk', 'one too many')
+    expect(readRaw()).toHaveLength(MAX_ENTRIES)
+  })
+
+  it('notifies subscribers and stops after unsubscribe', () => {
+    const listener = vi.fn()
+    const unsubscribe = subscribe(listener)
+
+    addActivity('a', 'one')
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    unsubscribe()
+    addActivity('a', 'two')
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails soft when localStorage throws on write', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError')
+    })
+
+    expect(() => addActivity('a', 'one')).not.toThrow()
+  })
+
+  it('fails soft when localStorage throws on read', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError')
+    })
+
+    expect(() => addActivity('a', 'one')).not.toThrow()
+    expect(getActivities()).toEqual([])
+  })
+})
+
+describe('getActivities', () => {
+  it('returns entries newest first', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: 'b', type: 'a', description: 'middle', timestamp: 2000 },
+        { id: 'a', type: 'a', description: 'oldest', timestamp: 1000 },
+        { id: 'c', type: 'a', description: 'newest', timestamp: 3000 },
+      ]),
+    )
+
+    expect(getActivities().map(entry => entry.description)).toEqual([
+      'newest',
+      'middle',
+      'oldest',
     ])
   })
 
-  it('sorts valid stored activities newest-first', () => {
+  it('breaks timestamp ties by id, descending', () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([
-        { id: 'oldest', type: 'settings', description: 'Oldest activity.', timestamp: 1 },
-        { id: 'newest', type: 'settings', description: 'Newest activity.', timestamp: 3 },
-        { id: 'middle', type: 'settings', description: 'Middle activity.', timestamp: 2 },
+        { id: '1700000000000-000001', type: 'a', description: 'second', timestamp: 1000 },
+        { id: '1700000000000-000002', type: 'a', description: 'third', timestamp: 1000 },
+        { id: '1700000000000-000000', type: 'a', description: 'first', timestamp: 1000 },
       ]),
     )
 
-    expect(getActivities().map((activity) => activity.id)).toEqual(['newest', 'middle', 'oldest'])
+    expect(getActivities().map(entry => entry.description)).toEqual([
+      'third',
+      'second',
+      'first',
+    ])
   })
 
-  it('preserves stored order for activities with equal timestamps', () => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify([
-        { id: 'first', type: 'settings', description: 'First activity.', timestamp: 1 },
-        { id: 'second', type: 'settings', description: 'Second activity.', timestamp: 1 },
-        { id: 'third', type: 'settings', description: 'Third activity.', timestamp: 1 },
-      ]),
-    )
+  it('returns newest-first after addActivity, including same-millisecond adds', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+    addActivity('a', 'first')
+    addActivity('a', 'second')
+    addActivity('a', 'third')
 
-    expect(getActivities().map((activity) => activity.id)).toEqual(['first', 'second', 'third'])
+    expect(getActivities().map(entry => entry.description)).toEqual([
+      'third',
+      'second',
+      'first',
+    ])
   })
 
-  it('caps storage at 100 entries and drops the oldest on the 101st add', () => {
-    for (let index = 0; index < 100; index += 1) {
-      addActivity('settings', `Activity ${index}`)
-    }
-
-    expect(getActivities()).toHaveLength(100)
-    expect(getActivities().some((activity) => activity.description === 'Activity 0')).toBe(true)
-
-    addActivity('settings', 'Activity 100')
-    const activities = getActivities()
-
-    expect(activities).toHaveLength(100)
-    expect(activities[0]?.description).toBe('Activity 100')
-    expect(activities.some((activity) => activity.description === 'Activity 0')).toBe(false)
+  it('returns [] when nothing is stored', () => {
+    expect(getActivities()).toEqual([])
   })
 
-  it('does not crash and returns an empty list for corrupted JSON', () => {
-    localStorage.setItem(STORAGE_KEY, '{not valid json')
+  it('returns [] for an empty string', () => {
+    localStorage.setItem(STORAGE_KEY, '')
+    expect(getActivities()).toEqual([])
+  })
 
+  it('returns [] for invalid JSON without throwing', () => {
+    localStorage.setItem(STORAGE_KEY, '{not json at all')
     expect(() => getActivities()).not.toThrow()
     expect(getActivities()).toEqual([])
   })
 
-  it('does not crash and returns an empty list for non-array JSON', () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ id: 'activity-1' }))
+  it('returns [] for a non-array payload', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ id: 'a' }))
+    expect(getActivities()).toEqual([])
 
-    expect(() => getActivities()).not.toThrow()
+    localStorage.setItem(STORAGE_KEY, JSON.stringify('nope'))
+    expect(getActivities()).toEqual([])
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(null))
     expect(getActivities()).toEqual([])
   })
 
-  it('returns an empty list for string and number JSON values', () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify('hello'))
-    expect(getActivities()).toEqual([])
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(42))
-    expect(getActivities()).toEqual([])
-  })
-
-  it('sanitizes entries with the wrong shape', () => {
+  it('filters out malformed members and keeps the valid ones', () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([
         null,
-        { id: 'activity-1', type: 'settings', description: 'Valid activity.', timestamp: 1 },
-        { id: 'activity-2', type: 'settings', timestamp: 2 },
+        'string entry',
+        42,
+        { id: 'x' },
+        { id: 1, type: 'a', description: 'numeric id', timestamp: 1 },
+        { id: 'y', type: 'a', description: 'string timestamp', timestamp: '123' },
+        { id: 'z', type: 'a', description: 'nan timestamp', timestamp: Number.NaN },
+        { id: 'ok', type: 'a', description: 'valid', timestamp: 5000 },
       ]),
     )
 
+    expect(() => getActivities()).not.toThrow()
     expect(getActivities()).toEqual([
-      { id: 'activity-1', type: 'settings', description: 'Valid activity.', timestamp: 1 },
+      { id: 'ok', type: 'a', description: 'valid', timestamp: 5000 },
     ])
   })
 
-  it('drops timestamps outside the valid Date range', () => {
+  it('filters out finite timestamps outside the representable Date range', () => {
+    // 1e20 is finite but too large for Date; new Date(1e20).toISOString() throws.
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([
-        { id: 'too-large', type: 'settings', description: 'Too large.', timestamp: 1e300 },
-        { id: 'valid', type: 'settings', description: 'Valid activity.', timestamp: 1 },
+        { id: 'huge', type: 'a', description: 'out of range', timestamp: 1e20 },
+        { id: 'ok', type: 'a', description: 'valid', timestamp: 5000 },
       ]),
     )
 
+    expect(() => getActivities()).not.toThrow()
     expect(getActivities()).toEqual([
-      { id: 'valid', type: 'settings', description: 'Valid activity.', timestamp: 1 },
+      { id: 'ok', type: 'a', description: 'valid', timestamp: 5000 },
     ])
   })
 
-  it('de-duplicates stored activities by id and keeps the first occurrence', () => {
+  it('keeps timestamps exactly at the max representable Date value', () => {
+    // 8.64e15 is the ECMAScript max time value and is still a valid Date.
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([
-        { id: 'duplicate', type: 'settings', description: 'First duplicate.', timestamp: 1 },
-        { id: 'duplicate', type: 'settings', description: 'Second duplicate.', timestamp: 3 },
-        { id: 'unique', type: 'settings', description: 'Unique activity.', timestamp: 2 },
+        { id: 'edge', type: 'a', description: 'at boundary', timestamp: 8.64e15 },
       ]),
     )
 
     expect(getActivities()).toEqual([
-      { id: 'unique', type: 'settings', description: 'Unique activity.', timestamp: 2 },
-      { id: 'duplicate', type: 'settings', description: 'First duplicate.', timestamp: 1 },
+      { id: 'edge', type: 'a', description: 'at boundary', timestamp: 8.64e15 },
     ])
   })
+})
 
-  it('notifies subscribers on add and supports unsubscribe', () => {
-    const listener = vi.fn()
-    const unsubscribe = subscribe(listener)
+describe('relativeTime', () => {
+  const now = 1_700_000_000_000
+  const ago = (ms: number) => relativeTime(now - ms, now)
 
-    addActivity('settings', 'First update.')
-    unsubscribe()
-    addActivity('settings', 'Second update.')
+  it('reports "just now" under a minute', () => {
+    expect(ago(0)).toBe('just now')
+    expect(ago(1_000)).toBe('just now')
+    expect(ago(59_000)).toBe('just now')
+    expect(ago(59_999)).toBe('just now')
+  })
 
-    expect(listener).toHaveBeenCalledTimes(1)
+  it('rolls exactly 60s into the minutes tier', () => {
+    expect(ago(60_000)).toBe('1m ago')
+  })
+
+  it('reports minutes up to the hour boundary', () => {
+    expect(ago(120_000)).toBe('2m ago')
+    expect(ago(59 * 60_000 + 59_000)).toBe('59m ago')
+    expect(ago(3_599_999)).toBe('59m ago')
+  })
+
+  it('rolls exactly 3600s into the hours tier', () => {
+    expect(ago(3_600_000)).toBe('1h ago')
+  })
+
+  it('reports hours up to the day boundary', () => {
+    expect(ago(2 * 3_600_000)).toBe('2h ago')
+    expect(ago(23 * 3_600_000 + 59 * 60_000)).toBe('23h ago')
+    expect(ago(86_399_999)).toBe('23h ago')
+  })
+
+  it('rolls exactly 86400s into the days tier', () => {
+    expect(ago(86_400_000)).toBe('1d ago')
+  })
+
+  it('reports multi-day ages', () => {
+    expect(ago(3 * 86_400_000)).toBe('3d ago')
+    expect(ago(45 * 86_400_000 + 3_600_000)).toBe('45d ago')
+  })
+
+  it('treats future timestamps as "just now"', () => {
+    expect(relativeTime(now + 1_000, now)).toBe('just now')
+    expect(relativeTime(now + 10 * 86_400_000, now)).toBe('just now')
   })
 })
