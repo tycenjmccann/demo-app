@@ -1,6 +1,7 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActivityFeed } from './ActivityFeed'
+import App from './App'
 import { addActivity } from './activity'
 
 const STORAGE_KEY = 'demo.activity'
@@ -38,6 +39,18 @@ describe('ActivityFeed', () => {
     expect(screen.getByText('settings')).toBeInTheDocument()
     expect(screen.getByText('Updated notification preferences.')).toBeInTheDocument()
     expect(screen.getByText('just now')).toBeInTheDocument()
+  })
+
+  it('records production settings interactions in the recent activity feed', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle email notifications' }))
+
+    expect(screen.getByRole('button', { name: 'Toggle email notifications' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('On')).toBeInTheDocument()
+    expect(screen.queryByText('No recent activity yet. Actions you take will show up here.')).not.toBeInTheDocument()
+    expect(screen.getByText('settings')).toBeInTheDocument()
+    expect(screen.getByText('Turned email notifications on.')).toBeInTheDocument()
   })
 
   it('renders relative timestamps at expected boundaries', () => {
