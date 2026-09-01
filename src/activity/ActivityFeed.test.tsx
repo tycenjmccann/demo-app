@@ -1,8 +1,11 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ActivityFeed } from './ActivityFeed'
-import App from './App'
-import { addActivity } from './activity'
+import ActivityFeed from './ActivityFeed'
+import App from '../App'
+import { addActivity } from './activityStore'
+
+// Unified render test suite combining the TEAM-3628 (main) and TEAM-3630
+// (branch) lineages, plus the TEAM-3668 P2 periodic-refresh regression test.
 
 const STORAGE_KEY = 'demo.activity'
 
@@ -23,10 +26,14 @@ describe('ActivityFeed', () => {
     vi.useRealTimers()
   })
 
+  // --- main (TEAM-3628) lineage ---------------------------------------
+
   it('renders the empty state when there are no activities', () => {
     render(<ActivityFeed />)
 
-    expect(screen.getByText('No recent activity yet. Actions you take will show up here.')).toBeInTheDocument()
+    expect(
+      screen.getByText('No recent activity yet. Actions you take will show up here.'),
+    ).toBeInTheDocument()
   })
 
   it('live-updates when a new activity is added', () => {
@@ -46,9 +53,14 @@ describe('ActivityFeed', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle email notifications' }))
 
-    expect(screen.getByRole('button', { name: 'Toggle email notifications' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Toggle email notifications' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
     expect(screen.getByText('On')).toBeInTheDocument()
-    expect(screen.queryByText('No recent activity yet. Actions you take will show up here.')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('No recent activity yet. Actions you take will show up here.'),
+    ).not.toBeInTheDocument()
     expect(screen.getByText('settings')).toBeInTheDocument()
     expect(screen.getByText('Turned email notifications on.')).toBeInTheDocument()
   })
@@ -104,7 +116,9 @@ describe('ActivityFeed', () => {
     )
 
     expect(() => render(<ActivityFeed />)).not.toThrow()
-    expect(screen.getByText('No recent activity yet. Actions you take will show up here.')).toBeInTheDocument()
+    expect(
+      screen.getByText('No recent activity yet. Actions you take will show up here.'),
+    ).toBeInTheDocument()
   })
 
   it('renders out-of-order valid storage newest-first', () => {
@@ -138,5 +152,60 @@ describe('ActivityFeed', () => {
 
     expect(consoleError).not.toHaveBeenCalled()
     consoleError.mockRestore()
+  })
+
+  // --- branch (TEAM-3630) lineage -------------------------------------
+
+  it('renders the empty state with no list when there are no activities', () => {
+    render(<ActivityFeed />)
+
+    // Unified empty-state copy (adopted from main). The structural assertion
+    // from the branch — that the empty state renders no list — is preserved.
+    expect(
+      screen.getByText('No recent activity yet. Actions you take will show up here.'),
+    ).toBeInTheDocument()
+
+    expect(screen.queryByRole('list')).toBeNull()
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+    expect(document.querySelector('ul')).toBeNull()
+    expect(document.querySelector('li')).toBeNull()
+  })
+
+  it('does not throw when a stored entry has a huge finite timestamp (TEAM-3658)', () => {
+    // Regression: an out-of-range but finite timestamp must not crash render.
+    // Previously new Date(9e15).toISOString() threw RangeError during render.
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: 'x', type: 'evil', description: 'huge ts', timestamp: 9e15 },
+        { id: 'y', type: 'evil', description: 'astronomical ts', timestamp: 1e300 },
+        { id: 'z', type: 'evil', description: 'huge negative ts', timestamp: -9e15 },
+      ]),
+    )
+
+    expect(() => render(<ActivityFeed />)).not.toThrow()
+  })
+
+  // --- TEAM-3668 P2: periodic relative-timestamp refresh --------------
+
+  it('refreshes stale relative labels on the periodic timer (P2, TEAM-3668)', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+
+    // Seed one entry timestamped "now" so it initially renders "just now".
+    addActivity('settings', 'Timer refresh entry.')
+
+    render(<ActivityFeed />)
+    expectActivityTime('Timer refresh entry.', 'just now')
+
+    // Advance fake time past 60s + the 30s refresh interval so at least one
+    // refresh tick fires after the label should have crossed the 1-minute
+    // boundary. Wrap timer advances in act() so React flushes the re-render.
+    act(() => {
+      vi.advanceTimersByTime(90_000)
+    })
+
+    expectActivityTime('Timer refresh entry.', '1m ago')
+    expect(screen.queryByText('just now')).not.toBeInTheDocument()
   })
 })
