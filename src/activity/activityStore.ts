@@ -166,6 +166,40 @@ export function addActivity(type: string, description: string): Activity {
 }
 
 /**
+ * Remove every stored entry at once (TEAM-4162) and notify subscribers.
+ * Returns the removed entries NEWEST-FIRST so the caller can hold them as an
+ * in-memory undo snapshot; the snapshot is never written back to storage here.
+ * Fails soft on persistence errors, inheriting writeStoredActivities' behavior.
+ */
+export function clearActivities(): Activity[] {
+  const removed = readStoredActivities()
+
+  writeStoredActivities([])
+  notifySubscribers()
+
+  return removed
+}
+
+/**
+ * Merge previously cleared entries back in (TEAM-4162) and notify subscribers.
+ * The snapshot is listed FIRST so that on an id collision sanitizeActivities'
+ * keep-first-occurrence rule keeps the snapshot's copy, preserving the original
+ * ids, descriptions and timestamps. De-dupe, newest-first sort and the
+ * 100-entry cap are inherited from sanitizeActivities.
+ *
+ * Returns the sanitized result so a caller can keep its in-memory view
+ * consistent even when the persistence write fails (plan Concerns 10 and 11).
+ */
+export function restoreActivities(entries: Activity[]): Activity[] {
+  const merged = sanitizeActivities([...entries, ...readStoredActivities()])
+
+  writeStoredActivities(merged)
+  notifySubscribers()
+
+  return merged
+}
+
+/**
  * Single read source for the component. Returns entries NEWEST-FIRST.
  */
 export function getActivities(): Activity[] {
