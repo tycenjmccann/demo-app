@@ -1,5 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { addActivity, getActivities, subscribe } from './activityStore'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  addActivity,
+  clearActivities,
+  getActivities,
+  restoreActivities,
+  subscribe,
+  type Activity,
+} from './activityStore'
 
 // Unified store test suite. Combines the TEAM-3628 (main) and TEAM-3630
 // (branch) lineages against the reconciled store. Where the branch tests
@@ -305,5 +312,133 @@ describe('activity store', () => {
 
     unsub1()
     unsub2()
+  })
+})
+
+// --- TEAM-4162: clear the Activity feed with an undo window ------------
+
+describe('clearActivities / restoreActivities', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.useRealTimers()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  it('clearActivities empties storage and returns removed entries newest-first', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: 'oldest', type: 'settings', description: 'Oldest entry.', timestamp: 1 },
+        { id: 'newest', type: 'settings', description: 'Newest entry.', timestamp: 3 },
+        { id: 'middle', type: 'settings', description: 'Middle entry.', timestamp: 2 },
+      ]),
+    )
+
+    const removed = clearActivities()
+
+    // Returned newest-first, exactly the entries that were removed.
+    expect(removed).toEqual([
+      { id: 'newest', type: 'settings', description: 'Newest entry.', timestamp: 3 },
+      { id: 'middle', type: 'settings', description: 'Middle entry.', timestamp: 2 },
+      { id: 'oldest', type: 'settings', description: 'Oldest entry.', timestamp: 1 },
+    ])
+
+    // Committed to storage at call time: the key now holds an empty array.
+    expect(getActivities()).toEqual([])
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) as string)).toEqual([])
+  })
+
+  it('restoreActivities merges, de-dupes by id, sorts newest-first, caps at 100', () => {
+    // 61 stored entries, including one whose id also appears in the snapshot.
+    const stored: Activity[] = []
+    for (let index = 0; index < 60; index += 1) {
+      stored.push({
+        id: `stored-${index}`,
+        type: 'event',
+        description: `stored ${index}`,
+        timestamp: 1000 + index,
+      })
+    }
+    stored.push({ id: 'shared', type: 'event', description: 'stored copy of shared', timestamp: 3000 })
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
+
+    // 61 snapshot entries, newer than the stored ones, plus its own 'shared'.
+    const snapshot: Activity[] = []
+    for (let index = 0; index < 60; index += 1) {
+      snapshot.push({
+        id: `snap-${index}`,
+        type: 'event',
+        description: `snap ${index}`,
+        timestamp: 2000 + index,
+      })
+    }
+    snapshot.push({ id: 'shared', type: 'event', description: 'snapshot copy of shared', timestamp: 3000 })
+
+    const merged = restoreActivities(snapshot)
+
+    // 121 unique ids from 122 candidates, capped at 100.
+    expect(merged).toHaveLength(100)
+
+    // De-duplicated by id, and the snapshot's copy wins because the snapshot is
+    // listed first in the merge (keep-first-occurrence).
+    expect(merged.filter((activity) => activity.id === 'shared')).toEqual([
+      { id: 'shared', type: 'event', description: 'snapshot copy of shared', timestamp: 3000 },
+    ])
+
+    // Newest-first ordering across the whole merged result.
+    expect(merged[0]?.id).toBe('shared')
+    expect(merged[1]?.id).toBe('snap-59')
+    const timestamps = merged.map((activity) => activity.timestamp)
+    expect([...timestamps].sort((left, right) => right - left)).toEqual(timestamps)
+
+    // The cap dropped the oldest entries: stored-0..stored-20 are gone.
+    expect(merged.some((activity) => activity.id === 'stored-0')).toBe(false)
+    expect(merged[merged.length - 1]?.id).toBe('stored-21')
+
+    // The sanitized result is what was persisted, and what is read back.
+    expect(getActivities()).toEqual(merged)
+  })
+
+  it('clearActivities and restoreActivities fail soft and still notify', () => {
+    const entries: Activity[] = [
+      { id: 'a', type: 'settings', description: 'Entry A.', timestamp: 2 },
+      { id: 'b', type: 'settings', description: 'Entry B.', timestamp: 1 },
+    ]
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
+
+    // Write side: setItem throws (quota exceeded / access denied).
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError')
+    })
+    const writeListener = vi.fn()
+    const unsubscribeWrite = subscribe(writeListener)
+
+    expect(() => clearActivities()).not.toThrow()
+    expect(() => restoreActivities(entries)).not.toThrow()
+    // Both still notified subscribers even though persistence failed.
+    expect(writeListener).toHaveBeenCalledTimes(2)
+
+    unsubscribeWrite()
+    setItemSpy.mockRestore()
+
+    // Read side: getItem throws.
+    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError')
+    })
+    const readListener = vi.fn()
+    const unsubscribeRead = subscribe(readListener)
+
+    expect(() => clearActivities()).not.toThrow()
+    // A failed read fails soft to [], so nothing is reported as removed.
+    expect(clearActivities()).toEqual([])
+    expect(() => restoreActivities(entries)).not.toThrow()
+    expect(readListener).toHaveBeenCalledTimes(3)
+
+    unsubscribeRead()
+    getItemSpy.mockRestore()
   })
 })
