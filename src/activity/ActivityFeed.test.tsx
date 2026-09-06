@@ -675,4 +675,211 @@ describe('Clear activity + undo window', () => {
     // accepted R8 behavior: no throw, no error UI, no console output.
     expect(getActivities()).toHaveLength(3)
   })
+
+  // --- TEAM-4183 review fixes F1 / F2 / F2b / F3 -----------------------
+  //
+  // F1 hover-pause. React implements onPointerEnter/onPointerLeave on top of
+  // the pointerover/pointerout delegation pair, and RTL's fireEvent.pointerEnter
+  // /pointerLeave dispatch those, so the handlers do run under jsdom (verified:
+  // these tests fail if the handlers are removed). The same handlers are the
+  // ones a real browser uses, which the Playwright pass on this branch checks.
+
+  /** The notice row that owns the status text and the Undo pill. */
+  function getNoticeRow(): HTMLElement {
+    return getSection().querySelector('.activity-feed__notice') as HTMLElement
+  }
+
+  it('hovering the notice row pauses the undo window and leaving restarts a fresh window', () => {
+    useFrozenFakeTimers()
+    seedActivities(2)
+    render(<ActivityFeed />)
+
+    fireEvent.click(within(getSection()).getByRole('button', { name: 'Clear activity' }))
+
+    act(() => {
+      vi.advanceTimersByTime(3000)
+    })
+    expect(getUndoButton()).toBeInTheDocument()
+
+    // Pointer rests on the notice row: the countdown stops, so well past the
+    // original 5000 ms deadline the Undo pill is still offered.
+    fireEvent.pointerEnter(getNoticeRow())
+    act(() => {
+      vi.advanceTimersByTime(UNDO_WINDOW_MS)
+    })
+    expect(getUndoButton()).toBeInTheDocument()
+
+    // Pointer leaves: a FRESH full window starts rather than resuming the
+    // 2000 ms that were left, so the 4999/5000 boundary applies again.
+    fireEvent.pointerLeave(getNoticeRow())
+    act(() => {
+      vi.advanceTimersByTime(UNDO_WINDOW_MS - 1)
+    })
+    expect(getUndoButton()).toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(getUndoButton()).toBeNull()
+  })
+
+  it('a stale hover pause does not leak into the next window', () => {
+    useFrozenFakeTimers()
+    seedActivities(2)
+    render(<ActivityFeed />)
+
+    fireEvent.click(within(getSection()).getByRole('button', { name: 'Clear activity' }))
+
+    // Hover the row, then undo. The Undo button unmounts under the cursor, so
+    // no pointerleave is ever delivered and the pause flag would stay set.
+    fireEvent.pointerEnter(getNoticeRow())
+    fireEvent.click(getUndoButton() as HTMLElement)
+
+    // The next window must still be bounded.
+    fireEvent.click(within(getSection()).getByRole('button', { name: 'Clear activity' }))
+    expect(getUndoButton()).toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(UNDO_WINDOW_MS)
+    })
+    expect(getUndoButton()).toBeNull()
+  })
+
+  it('hovering the notice row while no window is open has no effect', () => {
+    useFrozenFakeTimers()
+    seedActivities(2)
+    render(<ActivityFeed />)
+
+    // No window open, so there is no countdown to pause.
+    fireEvent.pointerEnter(getNoticeRow())
+    expect(getUndoButton()).toBeNull()
+    expect(getClearButton()).toBeInTheDocument()
+
+    // A clear that follows an idle hover still expires on schedule, because
+    // handleClear resets the pause flag.
+    fireEvent.click(within(getSection()).getByRole('button', { name: 'Clear activity' }))
+    act(() => {
+      vi.advanceTimersByTime(UNDO_WINDOW_MS)
+    })
+    expect(getUndoButton()).toBeNull()
+  })
+
+  it('keeps the status live region rendered and unhidden while empty', () => {
+    useFrozenFakeTimers()
+    seedActivities(2)
+    render(<ActivityFeed />)
+
+    // Idle state: the region is empty but must still be in the a11y tree, so
+    // the first announcement mutates a region that already existed.
+    const status = within(getSection()).getByRole('status')
+    expect(status.textContent).toBe('')
+    expect(status).toBeInTheDocument()
+    expect(status).not.toHaveAttribute('aria-hidden')
+    expect(status).not.toHaveAttribute('hidden')
+    expect(getComputedStyle(status).display).not.toBe('none')
+    expect(getComputedStyle(status).visibility).not.toBe('hidden')
+
+    // The element also keeps its class rather than being swapped for a hidden
+    // variant, so the only way to hide it would be a stylesheet rule.
+    expect(status).toHaveClass('activity-feed__status')
+    expect(status).toHaveAttribute('role', 'status')
+
+    // NOTE: vitest runs with CSS processing disabled, so no stylesheet is
+    // applied here and the getComputedStyle checks above cannot catch a CSS
+    // regression on their own (a `?raw` import of the stylesheet returns '' for
+    // the same reason, and reading it with node:fs would need @types/node,
+    // which is not a dependency of this project). The effective cascade is
+    // therefore asserted in a real browser instead: the Playwright pass on this
+    // branch checks that the notice row measures 0 px tall when idle AND that
+    // getComputedStyle(status).display is not 'none' with the real stylesheet
+    // loaded. See docs/TEAM-4183-hover-pause.png and the PR body.
+  })
+
+  it('second Clear inside the window re-announces by mutating the status text', () => {
+    useFrozenFakeTimers()
+    seedActivities(2)
+    render(<ActivityFeed />)
+
+    fireEvent.click(within(getSection()).getByRole('button', { name: 'Clear activity' }))
+    expect(within(getSection()).getByRole('status')).toHaveTextContent('Activity cleared.')
+
+    // A new entry arrives during the window, so Clear is offered again.
+    act(() => {
+      addActivity('settings', 'Added between clears.')
+    })
+
+    // The second clear would otherwise re-set the identical string, which is
+    // not a DOM mutation and so is silent for screen readers. The region is
+    // blanked synchronously...
+    fireEvent.click(within(getSection()).getByRole('button', { name: 'Clear activity' }))
+    expect(within(getSection()).getByRole('status').textContent).toBe('')
+    // ...and the row does not collapse while blank, because the window is open.
+    expect(getUndoButton()).toBeInTheDocument()
+
+    // ...then re-set on the next tick, which is a real mutation.
+    act(() => {
+      vi.advanceTimersByTime(0)
+    })
+    expect(within(getSection()).getByRole('status')).toHaveTextContent('Activity cleared.')
+  })
+
+  it('a pending re-announce is cancelled by Undo', () => {
+    useFrozenFakeTimers()
+    seedActivities(2)
+    render(<ActivityFeed />)
+
+    fireEvent.click(within(getSection()).getByRole('button', { name: 'Clear activity' }))
+    act(() => {
+      addActivity('settings', 'Added between clears.')
+    })
+    fireEvent.click(within(getSection()).getByRole('button', { name: 'Clear activity' }))
+    expect(within(getSection()).getByRole('status').textContent).toBe('')
+
+    // Undo lands inside the blank tick: the queued re-set must not fire and
+    // overwrite the restore message.
+    fireEvent.click(getUndoButton() as HTMLElement)
+    expect(within(getSection()).getByRole('status')).toHaveTextContent('Activity restored.')
+
+    act(() => {
+      vi.advanceTimersByTime(UNDO_WINDOW_MS)
+    })
+    expect(within(getSection()).getByRole('status')).toHaveTextContent('Activity restored.')
+  })
+
+  it('Undo with an empty snapshot announces nothing and keeps focus off document.body', () => {
+    useFrozenFakeTimers()
+    seedActivities(3)
+    render(<ActivityFeed />)
+
+    // Install the read failure after seeding, so the entries are on screen and
+    // the failure is what a real "storage read broke at click time" looks like.
+    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError')
+    })
+
+    // clearActivities() reads first, so it fails soft to [] and reports nothing
+    // removed: the snapshot is empty even though the window opens.
+    fireEvent.click(within(getSection()).getByRole('button', { name: 'Clear activity' }))
+    const undoButton = getUndoButton()
+    expect(undoButton).toBeInTheDocument()
+    expect(undoButton).toHaveFocus()
+
+    fireEvent.click(undoButton as HTMLElement)
+
+    // No restore happened, so nothing is announced as restored.
+    const status = within(getSection()).getByRole('status')
+    expect(status.textContent).toBe('')
+    expect(status).not.toHaveTextContent('Activity restored.')
+    // The window closed and focus landed on the heading, not on document.body.
+    expect(getUndoButton()).toBeNull()
+    expect(document.body).not.toHaveFocus()
+    expect(screen.getByRole('heading', { name: 'Recent Activity', level: 2 })).toHaveFocus()
+
+    getItemSpy.mockRestore()
+
+    // The no-op Undo wrote nothing back: the clear is still committed and no
+    // phantom entries appeared.
+    expect(getActivities()).toEqual([])
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) as string)).toEqual([])
+  })
 })
