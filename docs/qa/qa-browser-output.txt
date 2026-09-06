@@ -1,0 +1,83 @@
+[CHECK 1] PASS S1: button text is 'Off' (actual: 'Off')
+[CHECK 2] PASS S1: aria-pressed is 'false' (actual: 'false')
+[CHECK 3] PASS S1: .settings__control-meta count === 0 (actual: 0)
+[CHECK 4] PASS S1: no element whose textContent starts with 'Last changed' (found: false)
+[CHECK 5] PASS S1: localStorage.getItem('demo.settings.emailNotifications') === null (actual: null)
+[CHECK 6] PASS S2: button text 'On' after click (actual: 'On')
+[CHECK 7] PASS S2: aria-pressed 'true' after click (actual: 'true')
+[CHECK 8] PASS S2: meta line text exactly 'Last changed just now' (actual: 'Last changed just now')
+S2: localStorage['demo.settings.emailNotifications'] = {"enabled":true,"lastChangedAt":1788676591906}
+[CHECK 9] PASS S2: parsed localStorage JSON has enabled===true and a finite lastChangedAt (actual: {"enabled":true,"lastChangedAt":1788676591906})
+[CHECK 10] PASS S2: Activity feed li count === 1 (actual: 1)
+[CHECK 11] PASS S2: feed item text contains 'Turned email notifications on.' (actual: 'settingsTurned email notifications on.just now')
+[CHECK 12] PASS S2: feed <time> text equals meta <time> text (feed: 'just now', meta: 'just now')
+[CHECK 13] PASS S2 (R4 millisecond agreement): feed <time> dateTime equals meta <time> dateTime (feed: '2026-09-06T06:36:31.906Z', meta: '2026-09-06T06:36:31.906Z')
+[CHECK 14] PASS S2-reload: button text still 'On' (actual: 'On')
+[CHECK 15] PASS S2-reload: aria-pressed still 'true' (actual: 'true')
+S2-reload: meta line text actual = 'Last changed just now'
+[CHECK 16] PASS S2-reload: meta line present with just-now-range text (actual: 'Last changed just now')
+[CHECK 17] PASS S2-reload: Activity feed still has 1 entry (actual: 1)
+[CHECK 18] PASS S3: button text 'Off' after second click (actual: 'Off')
+[CHECK 19] PASS S3: aria-pressed 'false' after second click (actual: 'false')
+[CHECK 20] PASS S3: localStorage enabled===false (actual: {"enabled":false,"lastChangedAt":1788676592199})
+[CHECK 21] PASS S3: Activity feed li count === 2 (actual: 2)
+[CHECK 22] PASS S3: newest feed item text contains 'Turned email notifications off.' (actual: 'settingsTurned email notifications off.just now')
+[CHECK 23] PASS S3: newest feed <time> dateTime equals meta <time> dateTime (feed: '2026-09-06T06:36:32.199Z', meta: '2026-09-06T06:36:32.199Z')
+[CHECK 24] PASS S3-reload: button text still 'Off' (actual: 'Off')
+[CHECK 25] PASS S3-reload: aria-pressed still 'false' (actual: 'false')
+[CHECK 26] PASS S3-reload (R1): meta line still present for a persisted false (actual count: 1)
+[CHECK 27] PASS S3-reload: Activity feed still has 2 entries (actual: 2)
+[CHECK 28] PASS S4: Activity feed li count === 3 after click (actual: 3)
+[CHECK 29] PASS S4: Activity feed li count === 4 after click (actual: 4)
+[CHECK 30] PASS S4: Activity feed li count === 5 after click (actual: 5)
+S4: localStorage lastChangedAt = 1788676592465, newest demo.activity entry timestamp = 1788676592465
+[CHECK 31] PASS S4: persisted lastChangedAt strictly equals newest feed entry timestamp (1788676592465 === 1788676592465)
+[CHECK 32] PASS S5a: h1 'Settings' visible after reload with corrupt storage (actual: 'Settings')
+[CHECK 33] PASS S5a: button text 'Off' (actual: 'Off')
+[CHECK 34] PASS S5a: aria-pressed 'false' (actual: 'false')
+[CHECK 35] PASS S5a: .settings__control-meta count === 0 (actual: 0)
+[CHECK 36] PASS S5a: document.body.textContent does not contain 'not json'
+[CHECK 37] PASS S5a: zero console errors / pageerrors (actual: 0)
+[CHECK 38] PASS S5b: h1 'Settings' visible after reload with corrupt storage (actual: 'Settings')
+[CHECK 39] PASS S5b: button text 'Off' (actual: 'Off')
+[CHECK 40] PASS S5b: aria-pressed 'false' (actual: 'false')
+[CHECK 41] PASS S5b: .settings__control-meta count === 0 (actual: 0)
+[CHECK 42] PASS S5b: document.body.textContent does not contain '"yes"'
+[CHECK 43] PASS S5b: document.body.textContent does not contain 'enabled'
+[CHECK 44] PASS S5b: zero console errors / pageerrors (actual: 0)
+[CHECK 45] PASS S6: reached the toggle button via Tab within 10 presses (tabs used: 1)
+S6: number of Tab presses to reach the toggle button = 1
+[CHECK 46] PASS S6: after Space, button shows 'On' / aria-pressed='true' (actual: 'On' / 'true')
+[CHECK 47] PASS S6: focus remains on the toggle button after Space
+[CHECK 48] PASS S6: after Enter, button shows 'Off' / aria-pressed='false' (actual: 'Off' / 'false')
+[CHECK 49] PASS S6: focus remains on the toggle button after Enter
+[CHECK 50] PASS S6: aria-describedby is null (actual: null)
+[CHECK 51] PASS S6: full attribute name list equals ["aria-label","aria-pressed","class","type"] (actual: ["aria-label","aria-pressed","class","type"])
+[CHECK 52] PASS S6: Activity feed count === 2 after the two key presses (actual: 2)
+[CHECK 53] PASS S7: meta line text 'Last changed 12w ago' (actual: 'Last changed 12w ago')
+S7: document.documentElement.scrollWidth=320, window.innerWidth=320
+[CHECK 54] PASS S7: no horizontal scroll (scrollWidth 320 <= innerWidth 320)
+[CHECK 55] PASS S7: meta top (330) >= control row bottom (318) — beneath the row
+[CHECK 56] PASS S7: meta width (206) approx equals control row width (206), within 2px — full width, not squeezed into the flex row
+[CHECK 57] PASS S7: meta parentElement class includes 'settings__section' (actual: 'settings__section')
+[CHECK 58] PASS S7: meta previousElementSibling is the control row (actual class: 'settings__control')
+S7: computed .settings__control-meta font-size=12px, color=rgb(71, 85, 105)
+S7: computed .settings__control-description font-size=14px, color=rgb(71, 85, 105)
+[CHECK 59] PASS S8: meta line text 'Last changed 12w ago' (actual: 'Last changed 12w ago')
+S8: document.documentElement.scrollWidth=1280, window.innerWidth=1280
+[CHECK 60] PASS S8: no horizontal scroll (scrollWidth 1280 <= innerWidth 1280)
+[CHECK 61] PASS S8: meta top (256) >= control row bottom (244) — beneath the row
+[CHECK 62] PASS S8: meta width (590) approx equals control row width (590), within 2px — full width, not squeezed into the flex row
+[CHECK 63] PASS S8: meta parentElement class includes 'settings__section' (actual: 'settings__section')
+[CHECK 64] PASS S8: meta previousElementSibling is the control row (actual class: 'settings__control')
+S8: computed .settings__control-meta font-size=12px, color=rgb(71, 85, 105)
+S8: computed .settings__control-description font-size=14px, color=rgb(71, 85, 105)
+[CHECK 65] PASS S9: meta text 'Last changed just now' right after click (actual: 'Last changed just now')
+[CHECK 66] PASS S9: meta text becomes 'Last changed 5m ago' after clock.fastForward('05:30') with no interaction (actual: 'Last changed 5m ago')
+
+=== SUMMARY ===
+Total checks: 66, Passed: 66, Failed: 0
+Total console errors: 0
+Total console warnings: 0
+Total pageerrors: 0
+NOTE: served via `vite preview` against the production build (dist/), not `npm run dev` — React dev-only warnings (e.g. StrictMode double-invoke diagnostics) will not appear here.
