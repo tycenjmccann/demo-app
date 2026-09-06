@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   clearActivities,
   getActivities,
@@ -65,6 +65,12 @@ export function ActivityFeed() {
   // Bumped on every clear so the timer effect re-runs and the window restarts
   // when a second clear lands while a window is already open.
   const [undoWindowKey, setUndoWindowKey] = useState(0)
+  // TEAM-4183 F1: true while the pointer rests on the notice row, which pauses
+  // the countdown (PO decision, TEAM-4174 Concern 3).
+  const [isPaused, setIsPaused] = useState(false)
+  // TEAM-4183 F2b: a status string waiting to be re-set on the next tick so a
+  // repeated message is a real DOM mutation and therefore re-announced.
+  const [pendingStatus, setPendingStatus] = useState<StatusMessage | null>(null)
 
   // The undo snapshot lives in memory only and is never written to storage, so
   // a reload inside the window loses the ability to undo (spec R4, Concern 4).
@@ -105,6 +111,32 @@ export function ActivityFeed() {
   const hasStoredEntries = activities.length > 0
   const isNoticeActive = statusMessage !== '' || isWindowOpen
 
+  /**
+   * Close the undo window without restoring anything: drop the snapshot, hide
+   * the Undo affordance, remove the status text (removing text announces
+   * nothing — R7), cancel any pending re-announce, and clear the hover pause.
+   *
+   * Shared by the expiry timer and by the empty-snapshot Undo path so both
+   * behave identically (TEAM-4183 F3). Only refs and state setters are touched,
+   * all of which are stable, so an empty dependency list is correct.
+   */
+  const closeWindow = useCallback(() => {
+    // Read the focus owner BEFORE any state update unmounts the Undo button.
+    const undoHadFocus = document.activeElement === undoButtonRef.current
+
+    undoSnapshotRef.current = null
+    setIsWindowOpen(false)
+    setStatusMessage('')
+    setPendingStatus(null)
+    setIsPaused(false)
+
+    if (undoHadFocus) {
+      // The heading is always mounted and carries tabIndex={-1}, so focus is
+      // never dropped to document.body.
+      headingRef.current?.focus()
+    }
+  }, [])
+
   function handleClear() {
     const removed = clearActivities()
 
@@ -119,14 +151,42 @@ export function ActivityFeed() {
     // in memory even when persistence degraded (spec R8). On the success path
     // both values are identical.
     setActivities([])
-    setStatusMessage('Activity cleared.')
+
+    // TEAM-4183 F2b: re-setting the identical string is not a DOM mutation, so
+    // a screen reader would not re-announce a second clear inside an open
+    // window. Blank the region now and re-set it on the next tick, which is a
+    // real mutation. Any other prior status (first clear, or a clear right
+    // after an undo) changes the text on its own, so it stays synchronous —
+    // the existing tests assert that text synchronously.
+    if (statusMessage === 'Activity cleared.') {
+      setStatusMessage('')
+      setPendingStatus('Activity cleared.')
+    } else {
+      setStatusMessage('Activity cleared.')
+      setPendingStatus(null)
+    }
+
     setIsWindowOpen(true)
     setUndoWindowKey((key) => key + 1)
+    // Never inherit a stale pause: if the pointer was resting on the notice row
+    // when the Undo button unmounted under it, no pointerleave fires and the
+    // next window would never expire (TEAM-4183 F1).
+    setIsPaused(false)
     pendingFocusRef.current = 'undo'
   }
 
   function handleUndo() {
-    const snapshot = undoSnapshotRef.current ?? []
+    const snapshot = undoSnapshotRef.current
+
+    // Nothing to restore (e.g. the storage read failed when Clear was pressed,
+    // so clearActivities() reported no removed entries). Close the window the
+    // way expiry does rather than announcing a restore that did not happen and
+    // aiming focus at a Clear button that is not mounted (TEAM-4183 F3).
+    if (!snapshot || snapshot.length === 0) {
+      closeWindow()
+      return
+    }
+
     const restored = restoreActivities(snapshot)
 
     undoSnapshotRef.current = null
@@ -134,6 +194,8 @@ export function ActivityFeed() {
     setActivities(restored.slice(0, MAX_VISIBLE_ACTIVITIES))
     setIsWindowOpen(false)
     setStatusMessage('Activity restored.')
+    setPendingStatus(null)
+    setIsPaused(false)
     pendingFocusRef.current = 'clear'
   }
 
@@ -142,30 +204,40 @@ export function ActivityFeed() {
   // pattern as the REFRESH_INTERVAL_MS interval above (spec R3). Bumping
   // undoWindowKey re-runs this effect, which restarts the window on a second
   // clear.
+  //
+  // TEAM-4183 F1: `isPaused` is a dependency, so pointerenter on the notice row
+  // tears the timer down and pointerleave re-runs the effect with a FRESH
+  // UNDO_WINDOW_MS. Restarting rather than resuming is what the design sketches
+  // (Concern 3) and it needs no elapsed-time bookkeeping. With no pointer
+  // involved the effect is byte-for-byte the old one, so the 4999/5000 ms
+  // boundary is unchanged.
   useEffect(() => {
-    if (!isWindowOpen) {
+    if (!isWindowOpen || isPaused) {
+      return
+    }
+
+    const timeoutId = setTimeout(closeWindow, UNDO_WINDOW_MS)
+
+    return () => clearTimeout(timeoutId)
+  }, [isWindowOpen, undoWindowKey, isPaused, closeWindow])
+
+  // TEAM-4183 F2b: re-set a repeated status string one tick later so the live
+  // region sees a genuine text mutation. Effect-owned id, so it is cancelled by
+  // unmount, by Undo and by expiry (both null `pendingStatus`) exactly like the
+  // window timer above. `isNoticeActive` stays true across the blank tick
+  // because `isWindowOpen` is true, so the row does not collapse and reflow.
+  useEffect(() => {
+    if (pendingStatus === null) {
       return
     }
 
     const timeoutId = setTimeout(() => {
-      // Read the focus owner BEFORE any state update unmounts the Undo button.
-      const undoHadFocus = document.activeElement === undoButtonRef.current
-
-      undoSnapshotRef.current = null
-      setIsWindowOpen(false)
-      // Removing the text announces nothing, which is what R7 requires for
-      // expiry.
-      setStatusMessage('')
-
-      if (undoHadFocus) {
-        // The heading is always mounted and carries tabIndex={-1}, so focus is
-        // never dropped to document.body.
-        headingRef.current?.focus()
-      }
-    }, UNDO_WINDOW_MS)
+      setStatusMessage(pendingStatus)
+      setPendingStatus(null)
+    }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [isWindowOpen, undoWindowKey])
+  }, [pendingStatus])
 
   // Move focus once the target button has mounted. The dependencies change
   // exactly when that happens: isWindowOpen for Undo, hasStoredEntries for the
@@ -205,11 +277,20 @@ export function ActivityFeed() {
       </div>
 
       {/* Always mounted so the live region exists in the accessibility tree
-          before its text changes, which makes announcements reliable. */}
+          before its text changes, which makes announcements reliable. The
+          status paragraph is also always RENDERED (never display:none) — see
+          the note in ActivityFeed.css (TEAM-4183 F2).
+
+          Pointer enter/leave pause the countdown while the pointer rests on
+          this row, so the Undo pill cannot expire from under the cursor
+          (TEAM-4183 F1). Hovering while no window is open is inert: the timer
+          effect has nothing to tear down, and handleClear resets the flag. */}
       <div
         className={
           isNoticeActive ? 'activity-feed__notice activity-feed__notice--active' : 'activity-feed__notice'
         }
+        onPointerEnter={() => setIsPaused(true)}
+        onPointerLeave={() => setIsPaused(false)}
       >
         <p role="status" className="activity-feed__status">
           {statusMessage}
