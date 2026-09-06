@@ -153,6 +153,13 @@
   overflow-wrap: anywhere;
 }
 
-.activity-feed__status:empty {
-  display: none;
-}
+/* Deliberately NOT hidden while empty (TEAM-4183 F2). A `display: none`
+   element is not exposed to assistive tech, so an empty-then-hidden status
+   would enter the accessibility tree in the SAME mutation as its first text
+   and the announcement can be missed. The live region must pre-exist the
+   change, so no `:empty { display: none }`, no `visibility: hidden` and no
+   `aria-hidden` here. Costs no layout: an empty <p> with `margin: 0` generates
+   no line box, so the notice row measures 0 px tall when idle (measured in
+   Chromium). If a future change gives it intrinsic height, add `min-height: 0`
+   rather than hiding it. */
+
