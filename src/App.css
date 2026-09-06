@@ -83,3 +83,15 @@
   color: #ffffff;
 }
 
+/* Scoped under `.settings__section` so the declarations actually win: this is a
+   <p>, and `.settings__section p` above (font-size: 0.875rem) has higher
+   specificity than a lone class selector would. All values are reused from
+   `.settings__control-description`; only the top margin differs, to offset the
+   line from the control row. */
+.settings__section .settings__control-meta {
+  font-size: 0.75rem;
+  color: #475569;
+  line-height: 1.5;
+  margin: 0.75rem 0 0;
+}
+
