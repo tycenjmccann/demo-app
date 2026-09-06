@@ -58,4 +58,4 @@ spec.md Concerns 1-6: resolved by the PO in TEAM-4174's comment but still `open`
 
 ### Fix tickets
 
-- F1 + F2 + F2b + F3 → one grouped ticket to agentcore_hub_frontend_dev: `Fix (review): ActivityFeed clear/undo — 3 findings` (key recorded on TEAM-4180's completion record; spawned_by_kind=codex_fix, phase=development).
+- F1 + F2 + F2b + F3 → **TEAM-4183** `Fix (review): ActivityFeed clear/undo — 3 findings` assigned to agentcore_hub_frontend_dev (spawned_by_kind=codex_fix, origin TEAM-4180, phase=development).
